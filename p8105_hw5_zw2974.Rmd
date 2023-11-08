@@ -1,0 +1,166 @@
+---
+title: "p8105_hw5_zw2974"
+author: "Zihan Wu"
+date: "2023-11-08"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(rvest)
+library(viridis)
+library(readr)
+library(plotly)
+library(broom)
+library(purrr)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    warning = FALSE,
+    fig.width = 8, 
+  fig.height = 6,
+  out.width = "90%"
+)
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+```
+
+## Problem 2
+#### Create a tidy dataframe containing data from all participants, including the subject ID, arm, and observations over time
+
+```{r}
+data_all = tibble(filename = list.files("./data/"))
+readcsv = function(csv, path="./data/"){
+  paste(path,csv,sep="/") |> 
+    read.csv()
+}
+data_df =
+  data_all |> 
+  mutate(raw_results = map(data_all$filename, readcsv)) |> 
+  unnest(raw_results) |> 
+  mutate(filename_wo_csv = map_chr(.x = filename, ~ unlist(str_split(.x, "\\.") )[[1]] ) ) |> 
+  mutate(
+    arm = map_chr(.x = filename_wo_csv, ~ unlist(str_split(.x, "_") )[[1]] )) |> 
+  mutate(
+    subject_id = map_chr(.x = filename_wo_csv, ~ unlist(str_split(.x, "_") )[[2]] ))
+```
+
+#### Spaghetti Plot
+```{r}
+pivot_longer =
+  data_df |> 
+  pivot_longer(week_1:week_8,
+               names_to = "week",
+               names_prefix = "week_",
+               values_to = "value") |> 
+  mutate(week = as.integer(week))
+plot =
+  pivot_longer |> 
+  group_by(filename_wo_csv) |> 
+  ggplot(aes(x = week, y = value, color = interaction(arm, subject_id))) +
+    geom_line()
+plot
+```
+
+The plot indicates that over the span of eight weeks, there is a consistent uptrend in the measurements for all individuals in the experimental arm. In contrast, a comparative analysis of the experimental and control groups reveals that those in the experimental arm exhibit a more pronounced positive progression over time.
+
+## Problem 3
+#### First test μ=0
+```{r}
+sim_mean_pvalue = function(mu, n = 30, sigma = 5) {
+  sim_data = tibble(
+    x = rnorm(n = 30, mean = mu, sd = sigma),
+  )
+  
+  sim_data |>  
+    t.test() |>  
+    broom::tidy() |>  
+    select(mu_hat = estimate, 
+           p_value = p.value)
+  
+}
+
+sim_results_df = 
+  expand_grid(
+    true_mean = 0,
+    iter = 1:5000
+  ) |> 
+  mutate(
+    estimate_df = map(true_mean, sim_mean_pvalue)
+  ) |> 
+  unnest(estimate_df)
+```
+#### Repeat for μ={1,2,3,4,5,6}
+```{r}
+sim_results_df = 
+  expand_grid(
+    true_mean = c(0, 1, 2, 3, 4, 5, 6),
+    iter = 1:5000
+  ) |> 
+  mutate(
+    estimate_df = map(true_mean, sim_mean_pvalue)
+  ) |> 
+  unnest(estimate_df) |> 
+  select(-iter)
+```
+
+#### *Make a plot showing the proportion of times the null was rejected (the power of the test) on the y axis and the true value of μ on the x axis. Describe the association between effect size and power.
+#### *Make a plot showing the average estimate of μ̂ on the y axis and the true value of μ on the x axis. Make a second plot (or overlay on the first) the average estimate of μ̂ only in samples for which the null was rejected on the y axis and the true value of μ on the x axis. Is the sample average of μ̂ across tests for which the null is rejected approximately equal to the true value of μ? Why or why not?
+
+```{r}
+sim_results_df |> 
+  filter(p_value < 0.05) |> 
+  group_by(true_mean) |> 
+  summarise(power = n()/5000) |> 
+  ggplot(aes(x = true_mean, y = power)) +
+  geom_line() +
+  geom_point() +
+  geom_smooth() +
+  theme_minimal() +
+  labs(title = "Power vs. True value of μ", x = "True value of μ", y = "The power of the test")
+```
+
+As we can see in the plot, the power increases as the effect size raises from 0 to 6.
+
+```{r}
+sim_results_df |>  
+  group_by(true_mean) |> 
+  summarise(est_mean = mean(mu_hat)) |> 
+  ggplot(aes(x = true_mean, y = est_mean)) +
+  geom_line() +
+  geom_point() +
+  geom_smooth() +
+  labs(title = "The average estimate value of μ vs. True value of μ", x = "True value of μ", y = "The average estimate value of μ")
+```
+
+As we can see in the plot, the relationship between the average estimate value of μ and the true value of μ is positive correlated.
+
+```{r}
+sim_results_df |> 
+  filter(p_value < 0.05) |> 
+  group_by(true_mean) |> 
+  summarise(est_mean = mean(mu_hat)) |> 
+  ggplot(aes(x = true_mean, y = est_mean)) +
+  geom_line() +
+  geom_point() +
+  geom_smooth() +
+  theme_minimal() +
+  labs(title = "The average estimate value of μ (p_value < 0.05) vs. True value of μ", x = "True value of μ", y = "The average estimate value of μ")
+```
+
+As we can see in the plot, the sample average of μ̂ across tests for which the null is rejected (p_value < 0.05) is not approximately equal to the true value of μ. So the null will be rejected under the confidence interval.
+
+
+
+
+
+
+
+
